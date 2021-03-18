@@ -14,10 +14,11 @@ jobs:
           - { os: macos-latest, stack: lts-5.18 }
           - { os: macos-latest, stack: lts-17.5 }
             # cabal-1.16 is the earliest available in the ppa:hvr/ghc for ubuntu-16.04
-          - { os: ubuntu-16.04, ghc: 7.4.2, cabal: "1.16", prebuild: "sed -i.bak /utimensat/d configure.ac" }
           - { os: ubuntu-16.04, ghc: 7.4.2, cabal: "1.16" }
-          - { os: ubuntu-16.04, ghc: 7.6.3, cabal: "1.16" }
-          - { os: ubuntu-16.04, ghc: 7.8.4, cabal: "1.18" }
+          - { os: ubuntu-16.04, ghc: 7.4.2, cabal: "1.22", prebuild: "sed -i.bak /utimensat/d configure.ac" }
+          - { os: ubuntu-16.04, ghc: 7.4.2, cabal: "1.22" }
+          - { os: ubuntu-16.04, ghc: 7.6.3, cabal: "1.22" }
+          - { os: ubuntu-16.04, ghc: 7.8.4, cabal: "1.22" }
           - { os: ubuntu-16.04, ghc: 7.10.1, cabal: "1.22" }
           - { os: ubuntu-16.04, ghc: 8.0.1, cabal: "1.24" }
           - { os: ubuntu-latest, ghc: 9.0.1, cabal: 3.4.0.0 }
@@ -29,6 +30,7 @@ jobs:
           - { os: windows-latest, stack: lts-17.5 } # time-1.9.3, Win32-2.6.1.0
     runs-on: ${{ matrix.os }}
     env:
+      MATRIX: ${{ toJSON(matrix) }}
       PREBUILD: ${{ matrix.prebuild }}
       STACK_EXTRA_DEPS: ${{ matrix.stack-extra-deps }}
       STACK_RESOLVER: ${{ matrix.stack }}
@@ -52,3 +54,23 @@ jobs:
           Add-Content $Env:GITHUB_PATH C:\msys64\usr\bin
       - run: sh tools/testscript prepare
       - run: sh tools/testscript build
+      - uses: actions/upload-artifact@v2
+        with:
+          name: coverage-tix
+          path: coverage-*.tix
+  coverage:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v2
+      - uses: haskell-actions/setup@v1
+        with:
+          enable-stack: true
+      - uses: actions/download-artifact@v2
+        with:
+          name: coverage-tix
+      - run: |
+          stack hpc report coverage-*.tix --destdir=coverage-report
+      - uses: actions/upload-artifact@v2
+        with:
+          path: coverage-report

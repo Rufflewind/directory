@@ -104,10 +104,12 @@ build() {
             Darwin) testflags="FileTime.set-atime=False $testflags";;
         esac
 
-        $stack test --haddock --no-haddock-deps \
+        $stack test --coverage --haddock --no-haddock-deps \
             --ghc-options "$ghcflags" \
             --test-arguments "$testflags"
         $stack sdist
+        stack_local_hpc_root=`$stack path --local-hpc-root`
+        cp "$stack_local_hpc_root"/directory/test/test.tix coverage.tix
 
     else
 
@@ -143,8 +145,16 @@ build() {
             }
         fi
 
+        # check if `--enable-coverage` is supported (didn't exist until 1.21)
+        if cabal 2>&1 "$v1"configure --enable-coverage __dummy |
+               grep >/dev/null 2>&1 "cabal: unrecognized option \`--enable-coverage'"; then
+            enable_coverage=
+        else
+            enable_coverage=--enable-coverage
+        fi
+
         testflags=`printf " %s" "$testflags" | sed "s/ / --test-option=/g"`
-        cabal "$v1"configure -v2 --enable-tests --ghc-options="$ghcflags"
+        cabal "$v1"configure -v2 $enable_coverage --enable-tests --ghc-options="$ghcflags"
         cabal "$v1"build
         cabal "$v1"test --show-details="$streaming" $testflags
         cabal check
@@ -152,8 +162,12 @@ build() {
         relocate_v1_sdist_to_v2_dir
         cabal "$v1"copy
         cabal_install_run_tests dist-newstyle/sdist/*-*.tar.gz --force-reinstalls
+        cp dist/hpc/vanilla/tix/test/test.tix coverage.tix || :
 
     fi
+
+    matrix_hash=`printf "%s" "${MATRIX-}" | sha512sum | head -c 8`
+    mv coverage.tix "coverage-${matrix_hash}.tix"
 
     version=`sed -n 's/^version:[[:space:]]*//p' directory.cabal`
     grep -q "## $version (" changelog.md || {
