@@ -104,8 +104,8 @@ build() {
             Darwin) testflags="FileTime.set-atime=False $testflags";;
         esac
 
-        $stack test --coverage --haddock --no-haddock-deps \
-            --ghc-options "$ghcflags" \
+        $stack test --haddock --no-haddock-deps \
+            --ghc-options "-fhpc $ghcflags" --verbose \
             --test-arguments "$testflags"
         $stack sdist
         stack_local_hpc_root=`$stack path --local-hpc-root`
@@ -145,12 +145,15 @@ build() {
             }
         fi
 
+        # TODO: REMOVE THIS
         # check if `--enable-coverage` is supported (didn't exist until 1.21)
         if cabal 2>&1 "$v1"configure --enable-coverage __dummy |
                grep >/dev/null 2>&1 "cabal: unrecognized option \`--enable-coverage'"; then
             enable_coverage=
         else
-            enable_coverage=--enable-coverage
+            # Manually adding the flag because Cabal doesn't like older
+            # versions of GHC before 7.8.
+            enable_coverage=--ghc-options=-fhpc
         fi
 
         testflags=`printf " %s" "$testflags" | sed "s/ / --test-option=/g"`
@@ -162,7 +165,7 @@ build() {
         relocate_v1_sdist_to_v2_dir
         cabal "$v1"copy
         cabal_install_run_tests dist-newstyle/sdist/*-*.tar.gz --force-reinstalls
-        cp dist/hpc/vanilla/tix/test/test.tix coverage.tix || :
+        cp test.tix coverage.tix || :
 
     fi
 
