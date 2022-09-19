@@ -1,6 +1,7 @@
 module System.Directory.Internal.Posix where
 #include <HsDirectoryConfig.h>
 #if !defined(mingw32_HOST_OS)
+#include <fcntl.h>
 #ifdef HAVE_LIMITS_H
 # include <limits.h>
 #endif
@@ -16,6 +17,7 @@ import Data.Time.Clock.POSIX (POSIXTime)
 import System.OsPath ((</>), encodeFS, isRelative, splitSearchPath)
 import System.OsString.Internal.Types (OsString(OsString, getOsString))
 import qualified Data.Time.Clock.POSIX as POSIXTime
+import qualified System.Posix.Directory.Fd as Posix
 import qualified System.Posix.Directory.PosixPath as Posix
 import qualified System.Posix.Env.PosixString as Posix
 import qualified System.Posix.Files.PosixString as Posix
@@ -26,6 +28,22 @@ import qualified System.Posix.User as Posix
 
 createDirectoryInternal :: OsPath -> IO ()
 createDirectoryInternal (OsString path) = Posix.createDirectory path 0o777
+
+removePathAt :: FileType -> Maybe FileRef -> OsPath -> IO ()
+removePathAt fType maybeRef (OsString path) =
+  Posix.withFilePath path $ \ pPath -> do
+    print ("c_unlinkat", (fromMaybe c_AT_FDCWD maybeRef) ,path, flag)
+    (() <$) .  Posix.throwErrnoPathIfMinus1 "unlinkat" path $
+      c_unlinkat (fromMaybe c_AT_FDCWD maybeRef) pPath flag
+  where
+    flag | fileTypeIsDirectory fType = (#const AT_REMOVEDIR)
+         | otherwise                 = 0
+
+c_AT_FDCWD :: Posix.Fd
+c_AT_FDCWD = Posix.Fd (#const AT_FDCWD)
+
+foreign import ccall "unistd.h unlinkat" c_unlinkat
+  :: Posix.Fd -> CString -> CInt -> IO CInt
 
 removePathInternal :: Bool -> OsPath -> IO ()
 removePathInternal True  = Posix.removeDirectory . getOsString
@@ -105,9 +123,13 @@ exeExtensionInternal :: OsString
 exeExtensionInternal = exeExtension
 
 getDirectoryContentsInternal :: OsPath -> IO [OsPath]
-getDirectoryContentsInternal (OsString path) =
+getDirectoryContentsInternal path =
+  withFileRef Nothing path getDirectoryContentsAt
+
+getDirectoryContentsAt :: FileRef -> IO [OsPath]
+getDirectoryContentsAt fileRef =
   bracket
-    (Posix.openDirStream path)
+    (Posix.unsafeOpenDirStreamFd =<< Posix.dup fileRef)
     Posix.closeDirStream
     start
   where
@@ -155,10 +177,45 @@ createSymbolicLink _ (OsString p1) (OsString p2) =
 readSymbolicLink :: OsPath -> IO OsPath
 readSymbolicLink = (OsString <$>) . Posix.readSymbolicLink . getOsString
 
+type FileRef = Posix.Fd
+
+withFileRef :: Maybe FileRef -> OsPath -> (FileRef -> IO r) -> IO r
+withFileRef dirRef (OsString path) =
+  bracket
+    (Posix.openFdAt dirRef path Posix.ReadOnly defaultFlags)
+    Posix.closeFd
+
+data NoFollowRef = NoFollowLink | NoFollowRef FileRef deriving (Show)
+
+withNoFollowRef :: Maybe FileRef -> OsPath -> (NoFollowRef -> IO r) -> IO r
+withNoFollowRef dirRef path action =
+  (`ioeAddLocation` show (dirRef, path)) `modifyIOError` -- TEMPORARY
+  bracket (openNoFollowRef dirRef path) closeNoFollowRef action
+
+openNoFollowRef :: Maybe FileRef -> OsPath -> IO NoFollowRef
+openNoFollowRef dirRef osPath@(OsString path) =
+  (`ioeSetOsPath` osPath) `modifyIOError` do -- TEMPORARY
+  let flags = defaultFlags { Posix.nofollow = True }
+  result <- tryIOError (Posix.openFdAt dirRef path Posix.ReadOnly flags)
+  case result of
+    Left err -> do
+      errno <- getErrno
+      if errno == eLOOP
+        then pure NoFollowLink
+        else throwIO err
+    Right val -> pure (NoFollowRef val)
+
+closeNoFollowRef :: NoFollowRef -> IO ()
+closeNoFollowRef  NoFollowLink    = pure ()
+closeNoFollowRef (NoFollowRef fd) = Posix.closeFd fd
+
 type Metadata = Posix.FileStatus
 
 getSymbolicLinkMetadata :: OsPath -> IO Metadata
 getSymbolicLinkMetadata = Posix.getSymbolicLinkStatus . getOsString
+
+getFileRefMetadata :: FileRef -> IO Metadata
+getFileRefMetadata = Posix.getFdStatus
 
 getFileMetadata :: OsPath -> IO Metadata
 getFileMetadata = Posix.getFileStatus . getOsString
@@ -200,6 +257,10 @@ hasWriteMode m = m .&. allWriteMode /= 0
 setWriteMode :: Bool -> Mode -> Mode
 setWriteMode False m = m .&. complement allWriteMode
 setWriteMode True  m = m .|. allWriteMode
+
+forceRemovable :: FileRef -> Metadata -> IO ()
+forceRemovable fileRef status =
+  Posix.setFdMode fileRef (Posix.fileMode status .|. Posix.ownerModes)
 
 setFileMode :: OsPath -> Mode -> IO ()
 setFileMode = Posix.setFileMode . getOsString

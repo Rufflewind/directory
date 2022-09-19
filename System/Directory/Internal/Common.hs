@@ -215,6 +215,10 @@ simplifyWindows path
     subpathIsAbsolute = any isPathSeparator (take 1 (unpack subpath))
     hasTrailingPathSep = hasTrailingPathSeparator subpath
 
+-- | Whether to follow symbolic links when opening files.
+data FollowMode = FollowLinks | NoFollow
+                deriving (Bounded, Enum, Eq, Ord, Read, Show)
+
 data FileType = File
               | SymbolicLink -- ^ POSIX: either file or directory link; Windows: file link
               | Directory

@@ -96,6 +96,8 @@ import Foreign.C
   , CUShort(..)
   , CWString
   , CWchar(..)
+  , eLOOP
+  , getErrno
   , throwErrnoIfMinus1Retry_
   , throwErrnoIfMinus1_
   , throwErrnoIfNull

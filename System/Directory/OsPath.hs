@@ -10,8 +10,6 @@
 --
 -- System-independent interface to directory manipulation.
 --
--- @since 1.2.8.0
---
 -----------------------------------------------------------------------------
 
 module System.Directory.OsPath
@@ -457,36 +455,48 @@ removeContentsRecursive path =
 -- If an exception occurs while removing an entry, @removePathForcibly@ will
 -- still try to remove as many entries as it can before failing with an
 -- exception.  The first exception that it encountered is re-thrown.
+--
+-- @since 1.2.7.0
 removePathForcibly :: OsPath -> IO ()
 removePathForcibly path =
   (`ioeAddLocation` "removePathForcibly") `modifyIOError` do
-    ignoreDoesNotExistError $ do
-      m <- getSymbolicLinkMetadata path
-      case fileTypeFromMetadata m of
-        DirectoryLink -> do
-          makeRemovable path
-          removeDirectory path
-        Directory -> do
-          makeRemovable path
-          names <- listDirectory path
-          sequenceWithIOErrors_ $
-            [ removePathForcibly (path </> name) | name <- names ] ++
-            [ removeDirectory path ]
-        _ -> do
-          unless filesAlwaysRemovable (makeRemovable path)
-          removeFile path
+    ignoreDoesNotExistError (removeForcibly Nothing path)
+
   where
+
+    removeForcibly :: Maybe FileRef -> OsPath -> IO ()
+    removeForcibly dirRef name = do
+      print ("withFileRefAt", dirRef, name)
+      withNoFollowRef dirRef name $ \ noFollowRef -> do
+        print ("withFileRefAt RECEIVED ", noFollowRef, dirRef, name)
+        case noFollowRef of
+          NoFollowLink -> removePathAt File dirRef name
+          NoFollowRef rFile -> do
+            mFile <- getFileRefMetadata rFile
+            case fileTypeFromMetadata mFile of
+              DirectoryLink -> do
+                tryForceRemovable rFile mFile
+                removePathAt Directory dirRef name
+              Directory -> do
+                tryForceRemovable rFile mFile
+                names <-
+                  -- This filter is very important! Otherwise it will
+                  -- recurse into the parent directory and do bad things.
+                  filter (not . isSpecialDir) <$>
+                    getDirectoryContentsAt rFile
+                sequenceWithIOErrors_ $
+                  (removeForcibly (Just rFile) <$> names) <>
+                  [removePathAt Directory dirRef name]
+              _ -> do
+                unless filesAlwaysRemovable (tryForceRemovable rFile mFile)
+                removePathAt File dirRef name
 
     ignoreDoesNotExistError :: IO () -> IO ()
     ignoreDoesNotExistError action =
       () <$ tryIOErrorType isDoesNotExistError action
 
-    makeRemovable :: OsPath -> IO ()
-    makeRemovable p = (`catchIOError` \ _ -> pure ()) $ do
-      perms <- getPermissions p
-      setPermissions path perms{ readable = True
-                               , searchable = True
-                               , writable = True }
+    tryForceRemovable :: FileRef -> Metadata -> IO ()
+    tryForceRemovable r m = forceRemovable r m `catchIOError` \ _ -> pure ()
 
 {- |'removeFile' /file/ removes the directory entry for an existing file
 /file/, where /file/ is not itself a directory. The
@@ -699,6 +709,8 @@ renameFile opath npath =
 -- Either the destination path refers to an existing directory, or one of the
 -- parent segments in the destination path is not a directory.
 -- @[ENOTDIR, EISDIR, EINVAL, EEXIST, ENOTEMPTY]@
+--
+-- @since 1.2.7.0
 renamePath :: OsPath                  -- ^ Old path
            -> OsPath                  -- ^ New path
            -> IO ()
@@ -783,6 +795,8 @@ withReplacementFile path postAction action =
 -- the very act of copying can change the access time of the source file,
 -- hence the access times of the two files may differ after the operation
 -- completes.
+--
+-- @since 1.2.6.0
 copyFileWithMetadata :: OsPath        -- ^ Source file
                      -> OsPath        -- ^ Destination file
                      -> IO ()
@@ -940,6 +954,8 @@ canonicalizePath = \ path ->
 -- If the path is already absolute, the operation never fails.  Otherwise, the
 -- operation may fail with the same exceptions as 'getCurrentDirectory'.
 --
+-- @since 1.2.2.0
+--
 makeAbsolute :: OsPath -> IO OsPath
 makeAbsolute path =
   ((`ioeAddLocation` "makeAbsolute") .
@@ -1001,6 +1017,8 @@ findExecutable binary =
 -- 'findExecutablesInDirectories' using the search directories from the @PATH@
 -- environment variable.  Details can be found in the documentation of
 -- 'findExecutablesInDirectories'.
+--
+-- @since 1.2.2.0
 findExecutables :: OsString -> IO [OsPath]
 findExecutables binary =
   listTToList
@@ -1017,6 +1035,8 @@ findExecutables binary =
 -- Unlike other similarly named functions, 'findExecutablesInDirectories' does
 -- not use @SearchPath@ from the Win32 API.  The behavior of this function on
 -- Windows is therefore equivalent to those on non-Windows platforms.
+--
+-- @since 1.2.4.0
 findExecutablesInDirectories :: [OsPath] -> OsString -> IO [OsPath]
 findExecutablesInDirectories path binary =
   listTToList (findExecutablesInDirectoriesLazy path binary)
@@ -1041,6 +1061,8 @@ findFile = findFileWith (\ _ -> pure True)
 --
 -- The behavior is equivalent to 'findFilesWith'.  Details can be found in the
 -- documentation of 'findFilesWith'.
+--
+-- @since 1.2.1.0
 findFiles :: [OsPath] -> OsString -> IO [OsPath]
 findFiles = findFilesWith (\ _ -> pure True)
 
@@ -1051,6 +1073,8 @@ findFiles = findFilesWith (\ _ -> pure True)
 -- This is essentially a more performant version of 'findFilesWith' that
 -- always returns the first result, if any.  Details can be found in the
 -- documentation of 'findFilesWith'.
+--
+-- @since 1.2.6.0
 findFileWith :: (OsPath -> IO Bool) -> [OsPath] -> OsString -> IO (Maybe OsPath)
 findFileWith f ds name = listTHead (findFilesWithLazy f ds name)
 
@@ -1070,6 +1094,8 @@ findFileWith f ds name = listTHead (findFilesWithLazy f ds name)
 -- If the @name@ is an absolute path, then the function will return a single
 -- result if the file exists and satisfies the predicate and no results
 -- otherwise.  This is irrespective of what search directories were given.
+--
+-- @since 1.2.1.0
 findFilesWith :: (OsPath -> IO Bool) -> [OsPath] -> OsString -> IO [OsPath]
 findFilesWith f ds name = listTToList (findFilesWithLazy f ds name)
 
@@ -1093,8 +1119,19 @@ findFilesWithLazy f dirs path
 
 -- | Filename extension for executable files (including the dot if any)
 --   (usually @\"\"@ on POSIX systems and @\".exe\"@ on Windows or OS\/2).
+--
+-- @since 1.2.4.0
 exeExtension :: OsString
 exeExtension = exeExtensionInternal
+
+curDir :: OsPath
+curDir = os "."
+
+parDir :: OsPath
+parDir = os ".."
+
+isSpecialDir :: OsPath -> Bool
+isSpecialDir = (`elem` [curDir, parDir])
 
 -- | Similar to 'listDirectory', but always includes the special entries (@.@
 -- and @..@).  (This applies to Windows as well.)
@@ -1135,9 +1172,10 @@ getDirectoryContents path =
 --   The path refers to an existing non-directory object.
 --   @[ENOTDIR]@
 --
+-- @since 1.2.5.0
+--
 listDirectory :: OsPath -> IO [OsPath]
-listDirectory path = filter f <$> getDirectoryContents path
-  where f filename = filename /= os "." && filename /= os ".."
+listDirectory path = filter (not . isSpecialDir) <$> getDirectoryContents path
 
 -- | Obtain the current working directory as an absolute path.
 --
@@ -1223,6 +1261,8 @@ setCurrentDirectory = setCurrentDirectoryInternal
 -- The operation may fail with the same exceptions as 'getCurrentDirectory'
 -- and 'setCurrentDirectory'.
 --
+-- @since 1.2.3.0
+--
 withCurrentDirectory :: OsPath    -- ^ Directory to execute in
                      -> IO a      -- ^ Action to be executed
                      -> IO a
@@ -1232,6 +1272,8 @@ withCurrentDirectory dir action =
     action
 
 -- | Obtain the size of a file in bytes.
+--
+-- @since 1.2.7.0
 getFileSize :: OsPath -> IO Integer
 getFileSize path =
   (`ioeAddLocation` "getFileSize") `modifyIOError` do
@@ -1242,6 +1284,8 @@ getFileSize path =
 -- function may return false even if the file does actually exist.  This
 -- operation traverses symbolic links, so it can return either True or False
 -- for them.
+--
+-- @since 1.2.7.0
 doesPathExist :: OsPath -> IO Bool
 doesPathExist path = do
   (True <$ getFileMetadata path)
@@ -1296,6 +1340,8 @@ pathIsDirectory path =
 -- if the user lacks the privileges to create symbolic links.  It may also
 -- fail with 'illegalOperationErrorType' if the file system does not support
 -- symbolic links.
+--
+-- @since 1.3.1.0
 createFileLink
   :: OsPath                           -- ^ path to the target file
   -> OsPath                           -- ^ path of the link to be created
@@ -1329,6 +1375,8 @@ createFileLink target link =
 -- if the user lacks the privileges to create symbolic links.  It may also
 -- fail with 'illegalOperationErrorType' if the file system does not support
 -- symbolic links.
+--
+-- @since 1.3.1.0
 createDirectoryLink
   :: OsPath                           -- ^ path to the target directory
   -> OsPath                           -- ^ path of the link to be created
@@ -1343,6 +1391,8 @@ createDirectoryLink target link =
 -- is an alias for 'removeFile'.
 --
 -- See also: 'removeFile', which can remove an existing /file/ symbolic link.
+--
+-- @since 1.3.1.0
 removeDirectoryLink :: OsPath -> IO ()
 removeDirectoryLink path =
   (`ioeAddLocation` "removeDirectoryLink") `modifyIOError` do
@@ -1362,6 +1412,8 @@ removeDirectoryLink path =
 --
 -- * 'isPermissionError' if the user is not permitted to read the symbolic
 --   link.
+--
+-- @since 1.3.0.0
 pathIsSymbolicLink :: OsPath -> IO Bool
 pathIsSymbolicLink path =
   ((`ioeAddLocation` "pathIsSymbolicLink") .
@@ -1379,6 +1431,8 @@ pathIsSymbolicLink path =
 -- Windows-specific errors: This operation may fail with
 -- 'illegalOperationErrorType' if the file system does not support symbolic
 -- links.
+--
+-- @since 1.3.1.0
 getSymbolicLinkTarget :: OsPath -> IO OsPath
 getSymbolicLinkTarget path =
   (`ioeAddLocation` "getSymbolicLinkTarget") `modifyIOError` do
@@ -1396,6 +1450,8 @@ getSymbolicLinkTarget path =
 -- Caveat for POSIX systems: This function returns a timestamp with sub-second
 -- resolution only if this package is compiled against @unix-2.6.0.0@ or later
 -- and the underlying filesystem supports them.
+--
+-- @since 1.2.3.0
 --
 getAccessTime :: OsPath -> IO UTCTime
 getAccessTime path =
@@ -1441,6 +1497,8 @@ getModificationTime path =
 --   would not be able to set timestamps with sub-second resolution.  In this
 --   case, there would also be loss of precision in the modification time.
 --
+-- @since 1.2.3.0
+--
 setAccessTime :: OsPath -> UTCTime -> IO ()
 setAccessTime path atime =
   (`ioeAddLocation` "setAccessTime") `modifyIOError` do
@@ -1466,6 +1524,8 @@ setAccessTime path atime =
 -- * If compiled against a version of @unix@ prior to @2.7.0.0@, the function
 --   would not be able to set timestamps with sub-second resolution.  In this
 --   case, there would also be loss of precision in the access time.
+--
+-- @since 1.2.3.0
 --
 setModificationTime :: OsPath -> UTCTime -> IO ()
 setModificationTime path mtime =
@@ -1530,6 +1590,8 @@ getHomeDirectory =
 --   As of 1.3.5.0, the environment variable is ignored if set to a relative
 --   path, per revised XDG Base Directory Specification.  See
 --   <https://github.com/haskell/directory/issues/100 #100>.
+--
+--   @since 1.2.3.0
 getXdgDirectory :: XdgDirectory         -- ^ which special directory
                 -> OsPath             -- ^ a relative path that is appended
                                         --   to the path; if empty, the base

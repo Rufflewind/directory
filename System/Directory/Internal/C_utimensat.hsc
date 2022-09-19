@@ -16,6 +16,7 @@ module System.Directory.Internal.C_utimensat where
 import Prelude ()
 import System.Directory.Internal.Prelude
 import Data.Time.Clock.POSIX (POSIXTime)
+import qualified System.Posix as Posix
 
 data CTimeSpec = CTimeSpec EpochTime CLong
 
@@ -31,9 +32,6 @@ instance Storable CTimeSpec where
       nsec <- #{peek struct timespec, tv_nsec} p
       return (CTimeSpec sec nsec)
 
-c_AT_FDCWD :: CInt
-c_AT_FDCWD = (#const AT_FDCWD)
-
 utimeOmit :: CTimeSpec
 utimeOmit = CTimeSpec (CTime 0) (#const UTIME_OMIT)
 
@@ -44,6 +42,6 @@ toCTimeSpec t = CTimeSpec (CTime sec) (truncate $ 10 ^ (9 :: Int) * frac)
     (sec', frac') = properFraction (toRational t)
 
 foreign import capi "sys/stat.h utimensat" c_utimensat
-  :: CInt -> CString -> Ptr CTimeSpec -> CInt -> IO CInt
+  :: Posix.Fd -> CString -> Ptr CTimeSpec -> CInt -> IO CInt
 
 #endif
