@@ -147,5 +147,5 @@ import System.IO.Error
   , tryIOError
   , userError
   )
-import System.Posix.Types (EpochTime)
+import System.Posix.Types (CMode, EpochTime)
 import System.Timeout (timeout)

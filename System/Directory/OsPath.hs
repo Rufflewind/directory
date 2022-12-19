@@ -467,36 +467,37 @@ removePathForcibly path =
     removeForcibly :: Maybe FileRef -> OsPath -> IO ()
     removeForcibly dirRef name = do
       print ("withFileRefAt", dirRef, name)
-      withNoFollowRef dirRef name $ \ noFollowRef -> do
-        print ("withFileRefAt RECEIVED ", noFollowRef, dirRef, name)
-        case noFollowRef of
-          NoFollowLink -> removePathAt File dirRef name
-          NoFollowRef rFile -> do
-            mFile <- getFileRefMetadata rFile
-            case fileTypeFromMetadata mFile of
-              DirectoryLink -> do
-                tryForceRemovable rFile mFile
-                removePathAt Directory dirRef name
-              Directory -> do
-                tryForceRemovable rFile mFile
-                names <-
-                  -- This filter is very important! Otherwise it will
-                  -- recurse into the parent directory and do bad things.
-                  filter (not . isSpecialDir) <$>
-                    getDirectoryContentsAt rFile
-                sequenceWithIOErrors_ $
-                  (removeForcibly (Just rFile) <$> names) <>
-                  [removePathAt Directory dirRef name]
-              _ -> do
-                unless filesAlwaysRemovable (tryForceRemovable rFile mFile)
-                removePathAt File dirRef name
+      stat <- statAtNoFollow dirRef name
+      if not (statIsDirectory stat)
+        then do
+          unless filesAlwaysRemovable (tryForceRemovable dirRef name stat)
+          removePathAt File dirRef name
+        else do
+          tryForceRemovable dirRef name stat
+          withNoFollowRef dirRef name $ \ noFollowRef -> do
+            case noFollowRef of
+              NoFollowLink -> removePathAt File dirRef name
+              NoFollowRef rFile -> do
+                mFile <- getFileRefMetadata rFile
+                case fileTypeFromMetadata mFile of
+                  DirectoryLink -> removePathAt Directory dirRef name
+                  Directory -> do
+                    names <-
+                      -- This filter is very important! Otherwise it will
+                      -- recurse into the parent directory and do bad things.
+                      filter (not . isSpecialDir) <$>
+                        getDirectoryContentsAt rFile
+                    sequenceWithIOErrors_ $
+                      (removeForcibly (Just rFile) <$> names) <>
+                      [removePathAt Directory dirRef name]
+                  _ -> removePathAt File dirRef name
 
     ignoreDoesNotExistError :: IO () -> IO ()
     ignoreDoesNotExistError action =
       () <$ tryIOErrorType isDoesNotExistError action
 
-    tryForceRemovable :: FileRef -> Metadata -> IO ()
-    tryForceRemovable r m = forceRemovable r m `catchIOError` \ _ -> pure ()
+    tryForceRemovable :: Maybe FileRef -> OsPath -> Stat -> IO ()
+    tryForceRemovable r p s = forceRemovable r p s `catchIOError` \ _ -> pure ()
 
 {- |'removeFile' /file/ removes the directory entry for an existing file
 /file/, where /file/ is not itself a directory. The

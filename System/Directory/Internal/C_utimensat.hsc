@@ -22,8 +22,7 @@ data CTimeSpec = CTimeSpec EpochTime CLong
 
 instance Storable CTimeSpec where
     sizeOf    _ = #{size struct timespec}
-    -- workaround (hsc2hs for GHC < 8.0 doesn't support #{alignment ...})
-    alignment _ = #{size char[alignof(struct timespec)] }
+    alignment _ = #{alignment struct timespec}
     poke p (CTimeSpec sec nsec) = do
       (#poke struct timespec, tv_sec)  p sec
       (#poke struct timespec, tv_nsec) p nsec

@@ -1,9 +1,13 @@
+{-# LANGUAGE CApiFFI #-}
 module System.Directory.Internal.Posix where
 #include <HsDirectoryConfig.h>
 #if !defined(mingw32_HOST_OS)
 #include <fcntl.h>
 #ifdef HAVE_LIMITS_H
 # include <limits.h>
+#endif
+#ifdef HAVE_SYS_STAT_H
+# include <sys/stat.h>
 #endif
 import Prelude ()
 import System.Directory.Internal.Prelude
@@ -29,21 +33,53 @@ import qualified System.Posix.User as Posix
 createDirectoryInternal :: OsPath -> IO ()
 createDirectoryInternal (OsString path) = Posix.createDirectory path 0o777
 
-removePathAt :: FileType -> Maybe FileRef -> OsPath -> IO ()
-removePathAt fType maybeRef (OsString path) =
-  Posix.withFilePath path $ \ pPath -> do
-    print ("c_unlinkat", (fromMaybe c_AT_FDCWD maybeRef) ,path, flag)
-    (() <$) .  Posix.throwErrnoPathIfMinus1 "unlinkat" path $
-      c_unlinkat (fromMaybe c_AT_FDCWD maybeRef) pPath flag
-  where
-    flag | fileTypeIsDirectory fType = (#const AT_REMOVEDIR)
-         | otherwise                 = 0
-
 c_AT_FDCWD :: Posix.Fd
 c_AT_FDCWD = Posix.Fd (#const AT_FDCWD)
 
+data CStat = CStat { st_mode :: CMode }
+
+instance Storable CStat where
+  sizeOf    _ = #{size      struct stat}
+  alignment _ = #{alignment struct stat}
+  poke p (CStat { st_mode = mode }) = do
+    (#poke struct stat, st_mode) p mode
+  peek p = do
+    mode <- #{peek struct stat, st_mode} p
+    pure (CStat { st_mode = mode })
+
+foreign import capi "sys/stat.h fstatat" c_fstatat
+  :: Posix.Fd -> CString -> Ptr CStat -> CInt -> IO CInt
+
+c_AT_SYMLINK_NOFOLLOW :: CInt
+c_AT_SYMLINK_NOFOLLOW = (#const AT_SYMLINK_NOFOLLOW)
+
+-- This is conceptually the same as Posix.FileStatus, but since
+-- Posix.FileStatus is private we cannot use that version.
+type Stat = CStat
+
+statAtNoFollow :: Maybe FileRef -> OsPath -> IO Stat
+statAtNoFollow dirRef (OsString path) =
+  Posix.withFilePath path $ \ pPath ->
+  alloca $ \ pStat -> do
+    Posix.throwErrnoPathIfMinus1_ "fstatat" path $ do
+      c_fstatat (fromMaybe c_AT_FDCWD dirRef) pPath pStat c_AT_SYMLINK_NOFOLLOW
+    peek pStat
+
+statIsDirectory :: Stat -> Bool
+statIsDirectory m = (Posix.directoryMode .&. st_mode m) /= 0
+
 foreign import ccall "unistd.h unlinkat" c_unlinkat
   :: Posix.Fd -> CString -> CInt -> IO CInt
+
+removePathAt :: FileType -> Maybe FileRef -> OsPath -> IO ()
+removePathAt fType dirRef (OsString path) =
+  Posix.withFilePath path $ \ pPath -> do
+    Posix.throwErrnoPathIfMinus1_ "unlinkat" path
+      (c_unlinkat (fromMaybe c_AT_FDCWD dirRef) pPath flag)
+    pure ()
+  where
+    flag | fileTypeIsDirectory fType = (#const AT_REMOVEDIR)
+         | otherwise                 = 0
 
 removePathInternal :: Bool -> OsPath -> IO ()
 removePathInternal True  = Posix.removeDirectory . getOsString
@@ -193,8 +229,7 @@ withNoFollowRef dirRef path action =
   bracket (openNoFollowRef dirRef path) closeNoFollowRef action
 
 openNoFollowRef :: Maybe FileRef -> OsPath -> IO NoFollowRef
-openNoFollowRef dirRef osPath@(OsString path) =
-  (`ioeSetOsPath` osPath) `modifyIOError` do -- TEMPORARY
+openNoFollowRef dirRef (OsString path) = do
   let flags = defaultFlags { Posix.nofollow = True }
   result <- tryIOError (Posix.openFdAt dirRef path Posix.ReadOnly flags)
   case result of
@@ -258,9 +293,19 @@ setWriteMode :: Bool -> Mode -> Mode
 setWriteMode False m = m .&. complement allWriteMode
 setWriteMode True  m = m .|. allWriteMode
 
-forceRemovable :: FileRef -> Metadata -> IO ()
-forceRemovable fileRef status =
-  Posix.setFdMode fileRef (Posix.fileMode status .|. Posix.ownerModes)
+foreign import capi "sys/stat.h fchmodat" c_fchmodat
+  :: Posix.Fd -> CString -> CMode -> CInt -> IO CInt
+
+setFileModeAtNoFollow :: Maybe FileRef -> OsPath -> CMode -> IO ()
+setFileModeAtNoFollow dirRef (OsString path) mode = do
+  Posix.withFilePath path $ \ pPath ->
+    Posix.throwErrnoPathIfMinus1_ "fchmodat" path
+      (c_fchmodat (fromMaybe c_AT_FDCWD dirRef) pPath mode c_AT_SYMLINK_NOFOLLOW)
+
+forceRemovable :: Maybe FileRef -> OsPath -> Stat -> IO ()
+forceRemovable dirRef path stat = do
+  let mode = st_mode stat .|. Posix.ownerModes
+  setFileModeAtNoFollow dirRef path mode
 
 setFileMode :: OsPath -> Mode -> IO ()
 setFileMode = Posix.setFileMode . getOsString
