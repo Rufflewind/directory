@@ -25,20 +25,20 @@ main _t = do
   createDirectoryIfMissing True (tmp "a/z")
   createDirectoryIfMissing True (tmp "b")
   createDirectoryIfMissing True (tmp "c")
-  createDirectoryIfMissing True (tmp "f")
+  createDirectoryIfMissing True (tmp "f/s")
   writeFile (so (tmp "a/x/w/u")) "foo"
   writeFile (so (tmp "a/t"))     "bar"
-  writeFile (so (tmp "f/s"))     "qux"
+  writeFile (so (tmp "f/s/v"))   "qux"
   symlinkOrCopy (normalise "../a") (tmp "b/g")
   symlinkOrCopy (normalise "../b") (tmp "c/h")
   symlinkOrCopy (normalise "a")    (tmp "d")
+  setPermissions (tmp "f/s/v") emptyPermissions
   setPermissions (tmp "f/s") emptyPermissions
-  setPermissions (tmp "f") emptyPermissions
 
   ------------------------------------------------------------
   -- tests
 
-  removePathForcibly (tmp "f")
+  removePathForcibly (tmp "f/s")
   removePathForcibly (tmp "e") -- intentionally non-existent
 
   T(expectEq) () [".", "..", "a", "b", "c", "d"] . List.sort =<<
@@ -51,6 +51,8 @@ main _t = do
     getDirectoryContents (tmp "c")
   T(expectEq) () [".", "..", "t", "x", "y", "z"] . List.sort =<<
     getDirectoryContents (tmp "d")
+  T(expectEq) () [".", ".."] . List.sort =<<
+    getDirectoryContents (tmp "f")
 
   removePathForcibly (tmp "d")
 
