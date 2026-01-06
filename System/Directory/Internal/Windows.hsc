@@ -331,6 +331,16 @@ normaliseSeparators path
   | otherwise = toExtendedLengthPath path
   where normaliseSep c = if isPathSeparator c then pathSeparator else c
 
+extendedLengthPathPrefix :: OsPath
+extendedLengthPathPrefix = os "\\\\?\\"
+
+prependExtendedLengthPathPrefix :: OsPath -> OsPath
+prependExtendedLengthPathPrefix simplifiedPath =
+  case toChar <$> unpack simplifiedPath of
+    '\\' : '?'  : '?' : '\\' : _ -> simplifiedPath
+    '\\' : '\\' : _ -> simplifiedPath
+    _ -> extendedLengthPathPrefix <> simplifiedPath
+
 -- | 'simplify' the path and prepend the @"\\\\?\\"@ if possible.  This
 -- function can sometimes be used to bypass the @MAX_PATH@ length restriction
 -- in Windows API calls.
@@ -339,13 +349,8 @@ toExtendedLengthPath path =
   getOsString $
   if isRelative path
   then simplifiedPath
-  else
-    case toChar <$> simplifiedPath' of
-      '\\' : '?'  : '?' : '\\' : _ -> simplifiedPath
-      '\\' : '\\' : _ -> simplifiedPath
-      _ -> os "\\\\?\\" <> simplifiedPath
+  else prependExtendedLengthPathPrefix simplifiedPath
   where simplifiedPath = simplify path
-        simplifiedPath' = unpack simplifiedPath
 
 -- | Make a path absolute and convert to an extended length path, if possible.
 --
@@ -353,11 +358,21 @@ toExtendedLengthPath path =
 --
 -- This function never fails.  If it doesn't understand the path, it just
 -- returns the path unchanged.
+--
+-- This function plays a similar role to @toExtendedLengthPath@ in bypassing
+-- the @MAX_PATH@ length restriction, but can pretty much always convert paths
+-- into absolute paths since it uses @IO@.
 furnishPath :: OsPath -> IO WindowsPath
 furnishPath path =
-  (toExtendedLengthPath <$> rawPrependCurrentDirectory path)
-    `catchIOError` \ _ ->
-      pure (getOsString path)
+  getOsString <$>
+  if isRelative path
+  then
+    (prependExtendedLengthPathPrefix . OsString <$>
+      Win32.getFullPathName (getOsString simplifiedPath))
+      `catchIOError` \ _ ->
+        pure path
+  else pure (prependExtendedLengthPathPrefix simplifiedPath)
+  where simplifiedPath = simplify path
 
 -- | Strip the @"\\\\?\\"@ prefix if possible.
 -- The prefix is kept if the meaning of the path would otherwise change.

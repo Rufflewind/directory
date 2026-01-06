@@ -31,6 +31,7 @@ import System.OsPath
   , unpack
   , unsafeFromChar
   )
+import qualified System.OsString as OS
 
 -- | A generator with side-effects.
 newtype ListT m a = ListT { unListT :: m (Maybe (a, ListT m a)) }
@@ -118,6 +119,12 @@ os = rightOrError . encodeUtf
 so :: OsString -> String
 so = rightOrError . decodeUtf
 
+emptyPath :: OsPath
+emptyPath = mempty
+
+curDir :: OsPath
+curDir = os "."
+
 ioeSetOsPath :: IOError -> OsPath -> IOError
 ioeSetOsPath err =
   ioeSetFileName err .
@@ -128,7 +135,7 @@ ioeSetOsPath err =
 
 dropSpecialDotDirs :: [OsPath] -> [OsPath]
 dropSpecialDotDirs = filter f
-  where f filename = filename /= os "." && filename /= os ".."
+  where f filename = filename /= curDir && filename /= os ".."
 
 -- | Given a list of path segments, expand @.@ and @..@.  The path segments
 -- must not contain path separators.
@@ -139,7 +146,7 @@ expandDots = reverse . go []
       case xs' of
         [] -> ys'
         x : xs
-          | x == os "." -> go ys' xs
+          | x == curDir -> go ys' xs
           | x == os ".." ->
               case ys' of
                 [] -> go (x : ys') xs
@@ -165,14 +172,14 @@ normaliseTrailingSep path = do
 -- unchanged.
 emptyToCurDir :: OsPath -> OsPath
 emptyToCurDir path
-  | path == mempty = os "."
-  | otherwise      = path
+  | OS.null path = curDir
+  | otherwise    = path
 
 -- | Similar to 'normalise' but empty paths stay empty.
 simplifyPosix :: OsPath -> OsPath
 simplifyPosix path
-  | path == mempty = mempty
-  | otherwise      = normalise path
+  | OS.null path = emptyPath
+  | otherwise    = normalise path
 
 -- | Similar to 'normalise' but:
 --
@@ -183,7 +190,7 @@ simplifyPosix path
 -- The goal is to preserve the meaning of paths better than 'normalise'.
 simplifyWindows :: OsPath -> OsPath
 simplifyWindows path
-  | path == mempty = mempty
+  | OS.null path = emptyPath
   | otherwise = case toChar <$> unpack drive' of
       '\\' : '\\' : _ -> drive' <> subpath
       _ -> simplifiedPath
@@ -210,10 +217,10 @@ simplifyWindows path
     prependSep | subpathIsAbsolute = (pack [pathSeparator] <>)
                | otherwise = id
     avoidEmpty | not pathIsAbsolute
-               , drive == mempty || hasTrailingPathSep -- prefer "C:" over "C:."
+               , OS.null drive || hasTrailingPathSep -- prefer "C:" over "C:."
                  = emptyToCurDir
                | otherwise = id
-    appendSep p | hasTrailingPathSep, not (pathIsAbsolute && p == mempty)
+    appendSep p | hasTrailingPathSep, not (pathIsAbsolute && OS.null p)
                   = addTrailingPathSeparator p
                 | otherwise = p
     pathIsAbsolute = not (isRelative path)
