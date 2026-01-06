@@ -495,15 +495,6 @@ getFullPathName :: OsPath -> IO OsPath
 getFullPathName path =
   fromExtendedLengthPath <$> Win32.getFullPathName (toExtendedLengthPath path)
 
--- | Similar to 'prependCurrentDirectory' but fails for empty paths.
-rawPrependCurrentDirectory :: OsPath -> IO OsPath
-rawPrependCurrentDirectory path
-  | isRelative path =
-    ((`ioeAddLocation` "prependCurrentDirectory") .
-     (`ioeSetOsPath` path)) `modifyIOError` do
-      getFullPathName path
-  | otherwise = pure path
-
 -- | Convert a path into an absolute path.  If the given path is relative, the
 -- current directory is prepended and the path may or may not be simplified.
 -- If the path is already absolute, the path is returned unchanged.  The
@@ -514,7 +505,12 @@ rawPrependCurrentDirectory path
 --
 -- Empty paths are treated as the current directory.
 prependCurrentDirectory :: OsPath -> IO OsPath
-prependCurrentDirectory = rawPrependCurrentDirectory . emptyToCurDir
+prependCurrentDirectory
+  | isRelative path =
+    ((`ioeAddLocation` "prependCurrentDirectory") .
+     (`ioeSetOsPath` path)) `modifyIOError` do
+      Win32.getFullPathName (simplify (emptyToCurDir path))
+  | otherwise = pure path
 
 -- SetCurrentDirectory does not support long paths even with the \\?\ prefix
 -- https://ghc.haskell.org/trac/ghc/ticket/13373#comment:6

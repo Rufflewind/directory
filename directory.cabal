@@ -77,49 +77,12 @@ test-suite test
     default-language: Haskell2010
     other-extensions: BangPatterns, CPP
     default-extensions: OverloadedStrings
-    ghc-options:      -Wall
+    ghc-options:      -Wall -O2 -rtsopts
     hs-source-dirs:   tests
-    main-is:          Main.hs
+    main-is:          Bench.hs
     type:             exitcode-stdio-1.0
     build-depends:    base, directory, filepath, time
     if os(windows)
         build-depends: Win32
     else
         build-depends: unix
-    other-modules:
-        TestUtils
-        Util
-        -- test-modules-begin
-        CanonicalizePath
-        CopyFile001
-        CopyFile002
-        CopyFileWithMetadata
-        CreateDirectory001
-        CreateDirectoryIfMissing001
-        CurrentDirectory001
-        Directory001
-        DoesDirectoryExist001
-        DoesPathExist
-        FileTime
-        FindExecutable
-        FindFile001
-        GetDirContents001
-        GetDirContents002
-        GetFileSize
-        GetHomeDirectory001
-        GetHomeDirectory002
-        GetPermissions001
-        LongPaths
-        MakeAbsolute
-        MinimizeNameConflicts
-        PathIsSymbolicLink
-        RemoveDirectoryRecursive001
-        RemovePathForcibly
-        RenameDirectory
-        RenameFile001
-        RenamePath
-        Simplify
-        T8482
-        WithCurrentDirectory
-        Xdg
-        -- test-modules-end
