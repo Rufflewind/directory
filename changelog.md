@@ -9,6 +9,7 @@ Changelog for the [`directory`][1] package
     bounds to support 0.2.0. Note that close-on-exec when copying is only
     enabled on `file-io` 0.2.0 or later.
     ([#203](https://github.com/haskell/directory/issues/203))
+  * Relax `time` version bounds to support 1.16.
 
 ## 1.3.10.1 (Jan 2026)
 
