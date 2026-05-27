@@ -1,7 +1,7 @@
 Changelog for the [`directory`][1] package
 ==========================================
 
-## 1.3.11.0 (HEAD)
+## 1.3.11.0 (May 2026)
 
   * Cabal flag `os-string` was removed in favor of `impl(ghc >= 9.2)`.
     ([#176](https://github.com/haskell/directory/issues/176))
