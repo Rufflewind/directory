@@ -19,7 +19,7 @@ jobs:
         include:
           - { os: macos-latest, stack: lts-20.26, stack-extra-deps: "bytestring-0.11.3.0, file-io-0.1.4, filepath-1.5.2.0, os-string-2.0.2, unix-2.8.5.1", stack-package-flags: "{file-io: {os-string: true}, unix: {os-string: true}}" }
           - { os: macos-latest, stack: lts-24.29, ghc-flags: -Werror=deprecations }
-          - { os: ubuntu-latest, ghc: 8.10.7, cabal: 3.8.1.0 }
+          - { os: ubuntu-latest, ghc: 8.10.7, cabal: 3.10.2.0 }
           - { os: ubuntu-latest, ghc: 9.4.8, cabal: 3.12.1.0 }
           - { os: ubuntu-latest, ghc: latest, cabal: 3.16.1.0, upload-sdist: true, ghc-flags: -Werror=deprecations, cabal-constraints: time==1.16 }
           - { os: windows-latest, stack: lts-16.31, stack-extra-deps: "bytestring-0.11.3.0, file-io-0.1.4, filepath-1.4.100.0, time-1.9.3, Win32-2.14.1.0", overrides: "before_prepare() { sed -i.bak -e /CreateSymbolicLinkW/d -e /GetFinalPathNameByHandleW/d configure.ac; }" }
