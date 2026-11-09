@@ -52,6 +52,9 @@ jobs:
           cabal-version: ${{ matrix.cabal }}
           enable-stack: ${{ matrix.stack != '' }}
           stack-no-global: ${{ matrix.stack != '' }}
+      - if: startsWith(matrix.os, 'ubuntu-') && matrix.ghc == '9.4.8'
+        run: |
+          sudo sed -i '/HSC2HS_EXTRA="--lflag=-fuse-ld=gold"/d' /usr/local/.ghcup/ghc/9.4.8/bin/hsc2hs-ghc-9.4.8
       - uses: actions/checkout@v3
       - run: tools/testscript prepare
       - run: tools/testscript build
